@@ -4,20 +4,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 const port = 8080
 
 type application struct {
 	Domain string
+	JwtSecret string
 }
 
 func main() {
 	// set application config
-	var app application
-
-	// connect to the database
-	app.Domain = "example.com"
+	app := &application{
+		Domain: "example.com", 
+		JwtSecret: os.Getenv("JWT_SECRET"),
+	}
 
 	log.Println("Starting application on port ", port)
 

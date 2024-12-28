@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 
 -- Insert mock data
-INSERT INTO users (username, email, password_hash) VALUES
-('john_doe', 'john@example.com', 'hash123'),
-('jane_smith', 'jane@example.com', 'hash456');
+-- Add test user (password is 'testing')
+INSERT INTO users (email, password_hash) VALUES
+('testing@gmail.com', '$2a$10$mN6CaIxk7mU0QM3B2Q490euGHJS5Dx0AOTjG7v82f9dQL/Gm.gCEC');
 
 INSERT INTO posts (user_id, title, content) VALUES
 (1, 'First Post', 'This is my first post content'),
