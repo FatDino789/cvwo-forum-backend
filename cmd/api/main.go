@@ -21,6 +21,7 @@ func main() {
 		JwtSecret: os.Getenv("JWT_SECRET"),
 	}
 
+	// confirmation starting web server
 	log.Println("Starting application on port ", port)
 
 	// start a web server

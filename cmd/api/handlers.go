@@ -59,7 +59,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
 
-    // Updated query to match your schema
+    // updated query to match the schema
     rows, err := db.Query("SELECT id, user_id, title, content, created_at FROM posts")
     if err != nil {
         fmt.Println("Query error:", err)
@@ -83,6 +83,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
 
+	// print if there is any error
     if err := json.NewEncoder(w).Encode(posts); err != nil {
         fmt.Println("JSON encoding error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -94,10 +95,8 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
 
 // API endpoint for logging in
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("\n=== New Login Request ===")
-	fmt.Printf("Request Method: %s\n", r.Method)
 
-// Parsing the incoming JSON request and assigning it to the creds variable
+// parsing the incoming JSON request and assigning it to the creds variable
 	var creds Credentials
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
 				fmt.Printf("Error decoding request body: %v\n", err)
@@ -106,7 +105,7 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	}
 		fmt.Printf("Received credentials - Email: %s, Password: %s\n", creds.Email, creds.Password)
 
-	// Connect to the database
+	// connect to the database
 	connStr := config.GetDBConfig()
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -135,7 +134,7 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	}
 		fmt.Println("Password verification successful")
 
-	/* Generate JWT token, Claims are customised information while
+	/* generate JWT token, claims are customised information while
 	Registered claims are standardized information */
 	expirationTime := time.Now().Add(24 * time.Hour)
 	claims := &Claims {
@@ -155,7 +154,7 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	}
 		fmt.Println("JWT token generated successfully")
 
-	// Send response 
+	// send response 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	json.NewEncoder(w).Encode(map[string]string{
