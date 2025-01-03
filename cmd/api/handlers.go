@@ -41,7 +41,7 @@ type Claims struct {
 	UserID int `json:"user_id"`
 	jwt.RegisteredClaims
 }
-
+// default handler for testing
 func (app *application) Home(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintf(w, "Hello from %s", app.Domain)
 }

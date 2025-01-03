@@ -13,6 +13,7 @@ func GetDBConfig() string {
 		fmt.Println("Error loading .env file")
 	}
 
+	// get confidential information from .env file
     host := os.Getenv("DB_HOST")
     port := os.Getenv("DB_PORT")
     user := os.Getenv("DB_USER")

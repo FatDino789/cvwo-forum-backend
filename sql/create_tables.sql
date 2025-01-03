@@ -15,8 +15,7 @@ CREATE TABLE IF NOT EXISTS posts (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert mock data
--- Add test user (password is 'testing')
+-- Mock Data
 INSERT INTO users (email, password_hash) VALUES
 ('testing@gmail.com', '$2a$10$mN6CaIxk7mU0QM3B2Q490euGHJS5Dx0AOTjG7v82f9dQL/Gm.gCEC');
 
