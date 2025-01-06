@@ -15,11 +15,25 @@ import (
 
 // data type of the post stored in the database
 type Post struct {
-    ID        int    `json:"id"`
-    UserID    int    `json:"user_id"`
-    Title     string `json:"title"`
-    Content   string `json:"content"`
-    CreatedAt string `json:"created_at"`
+    ID              int       `json:"id"`
+    UserID          int       `json:"user_id"`
+    Title           string    `json:"title"`
+    Content         string    `json:"content"`
+    PictureURL      string    `json:"picture_url,omitempty"`
+    CreatedAt       time.Time `json:"created_at"`
+    LikesCount      int       `json:"likes_count"`
+    ViewsCount      int       `json:"views_count"`
+    DiscussionThread string   `json:"discussion_thread,omitempty"`
+    Comments        []Comment `json:"comments"`
+    UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// data type of the comment under each post 
+type Comment struct {
+    ID        int       `json:"id"`
+    UserID    int       `json:"user_id"`
+    Content   string    `json:"content"`
+    CreatedAt time.Time `json:"created_at"`
 }
 
 // data type of users stored in the database
@@ -49,7 +63,8 @@ func (app *application) Home(w http.ResponseWriter, r *http.Request) {
 // API endpoint for getting posts
 func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     fmt.Println("GetPosts endpoint hit")
-    
+
+    // Database connection
     connStr := config.GetDBConfig()
     db, err := sql.Open("postgres", connStr)
     if err != nil {
@@ -59,8 +74,24 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
 
-    // updated query to match the schema
-    rows, err := db.Query("SELECT id, user_id, title, content, created_at FROM posts")
+    // Query to fetch all post data
+    query := `
+        SELECT 
+            id, 
+            user_id, 
+            title, 
+            content, 
+            picture_url, 
+            created_at, 
+            likes_count, 
+            views_count, 
+            discussion_thread, 
+            comments, 
+            updated_at 
+        FROM posts 
+        ORDER BY created_at DESC`
+
+    rows, err := db.Query(query)
     if err != nil {
         fmt.Println("Query error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -71,19 +102,55 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     var posts []Post
     for rows.Next() {
         var post Post
-        err := rows.Scan(&post.ID, &post.UserID, &post.Title, &post.Content, &post.CreatedAt)
+        var pictureURL, discussionThread sql.NullString
+        var comments []byte
+
+        err := rows.Scan(
+            &post.ID,
+            &post.UserID,
+            &post.Title,
+            &post.Content,
+            &pictureURL,
+            &post.CreatedAt,
+            &post.LikesCount,
+            &post.ViewsCount,
+            &discussionThread,
+            &comments,
+            &post.UpdatedAt,
+        )
         if err != nil {
             fmt.Println("Row scan error:", err)
             http.Error(w, err.Error(), http.StatusInternalServerError)
             return
         }
+
+        // Handle nullable fields
+        if pictureURL.Valid {
+            post.PictureURL = pictureURL.String
+        }
+        if discussionThread.Valid {
+            post.DiscussionThread = discussionThread.String
+        }
+
+        // Parse JSONB comments
+        if len(comments) > 0 {
+            if err := json.Unmarshal(comments, &post.Comments); err != nil {
+                fmt.Println("Comments parsing error:", err)
+                http.Error(w, err.Error(), http.StatusInternalServerError)
+                return
+            }
+        } else {
+            post.Comments = []Comment{} // Initialize empty comments array
+        }
+
         posts = append(posts, post)
     }
 
+    // Set response headers
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// print if there is any error
+    // Encode and send response
     if err := json.NewEncoder(w).Encode(posts); err != nil {
         fmt.Println("JSON encoding error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
