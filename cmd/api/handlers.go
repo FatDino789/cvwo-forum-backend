@@ -28,7 +28,7 @@ type Post struct {
     UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// data type of the comment under each post 
+// data type of the comment under each post
 type Comment struct {
     ID        int       `json:"id"`
     UserID    int       `json:"user_id"`
@@ -63,8 +63,6 @@ func (app *application) Home(w http.ResponseWriter, r *http.Request) {
 // API endpoint for getting posts
 func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     fmt.Println("GetPosts endpoint hit")
-
-    // Database connection
     connStr := config.GetDBConfig()
     db, err := sql.Open("postgres", connStr)
     if err != nil {
@@ -74,24 +72,13 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
 
-    // Query to fetch all post data
-    query := `
-        SELECT 
-            id, 
-            user_id, 
-            title, 
-            content, 
-            picture_url, 
-            created_at, 
-            likes_count, 
-            views_count, 
-            discussion_thread, 
-            comments, 
-            updated_at 
-        FROM posts 
-        ORDER BY created_at DESC`
-
-    rows, err := db.Query(query)
+    // Updated query to include all new fields
+    rows, err := db.Query(`
+        SELECT id, user_id, title, content, picture_url, 
+               created_at, likes_count, views_count, 
+               discussion_thread, comments, updated_at 
+        FROM posts
+        ORDER BY created_at DESC`)
     if err != nil {
         fmt.Println("Query error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -99,11 +86,14 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
+    
+
     var posts []Post
     for rows.Next() {
         var post Post
+        // Using sql.NullString for fields that might be NULL
         var pictureURL, discussionThread sql.NullString
-        var comments []byte
+        var comments []byte // for JSONB data
 
         err := rows.Scan(
             &post.ID,
@@ -134,29 +124,25 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
 
         // Parse JSONB comments
         if len(comments) > 0 {
-            if err := json.Unmarshal(comments, &post.Comments); err != nil {
+            err = json.Unmarshal(comments, &post.Comments)
+            if err != nil {
                 fmt.Println("Comments parsing error:", err)
                 http.Error(w, err.Error(), http.StatusInternalServerError)
                 return
             }
-        } else {
-            post.Comments = []Comment{} // Initialize empty comments array
         }
 
         posts = append(posts, post)
     }
 
-    // Set response headers
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
 
-    // Encode and send response
     if err := json.NewEncoder(w).Encode(posts); err != nil {
         fmt.Println("JSON encoding error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
-
     fmt.Printf("Returning %d posts\n", len(posts))
 }
 
