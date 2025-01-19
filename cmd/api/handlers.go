@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
 // data type of the post stored in the database
 type Post struct {
-    ID              int       `json:"id"`
-    UserID          int       `json:"user_id"`
+    ID              string    `json:"id"`
+    UserID          string    `json:"user_id"`
     Title           string    `json:"title"`
     Content         string    `json:"content"`
     PictureURL      string    `json:"picture_url,omitempty"`
@@ -26,22 +26,31 @@ type Post struct {
     DiscussionThread string   `json:"discussion_thread,omitempty"`
     Comments        []Comment `json:"comments"`
     UpdatedAt       time.Time `json:"updated_at"`
+    Tags            []string  `json:"tags"`  
 }
 
 // data type of the comment under each post
 type Comment struct {
-    ID        int       `json:"id"`
-    UserID    int       `json:"user_id"`
+    ID        string    `json:"id"`
+    UserID    string    `json:"user_id"`
     Content   string    `json:"content"`
     CreatedAt time.Time `json:"created_at"`
 }
 
 // data type of users stored in the database
 type User struct {
-    ID           int       `json:"id"`
+    ID           string    `json:"id"`
     Email        string    `json:"email"`
     PasswordHash string    `json:"-"`
     CreatedAt    time.Time `json:"created_at"`
+}
+
+// data type for tags
+type Tag struct {
+    ID       string `json:"id"`
+    Text     string `json:"text"`
+    Color    string `json:"color"`
+    Searches int    `json:"searches"`
 }
 
 // data type received from the front end
@@ -52,8 +61,8 @@ type Credentials struct {
 
 // data type of JWT token
 type Claims struct {
-	UserID int `json:"user_id"`
-	jwt.RegisteredClaims
+    UserID string `json:"user_id"`
+    jwt.RegisteredClaims
 }
 // default handler for testing
 func (app *application) Home(w http.ResponseWriter, r *http.Request) {
@@ -72,11 +81,10 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
 
-    // Updated query to include all new fields
     rows, err := db.Query(`
         SELECT id, user_id, title, content, picture_url, 
                created_at, likes_count, views_count, 
-               discussion_thread, comments, updated_at 
+               discussion_thread, comments, updated_at, tags 
         FROM posts
         ORDER BY created_at DESC`)
     if err != nil {
@@ -86,12 +94,9 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    
-
     var posts []Post
     for rows.Next() {
         var post Post
-        // Using sql.NullString for fields that might be NULL
         var pictureURL, discussionThread sql.NullString
         var comments []byte // for JSONB data
 
@@ -107,6 +112,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
             &discussionThread,
             &comments,
             &post.UpdatedAt,
+            pq.Array(&post.Tags),  // Use pq.Array for scanning PostgreSQL array
         )
         if err != nil {
             fmt.Println("Row scan error:", err)
@@ -145,7 +151,6 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     fmt.Printf("Returning %d posts\n", len(posts))
 }
-
 // API endpoint for logging in
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 
@@ -177,7 +182,7 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
-		fmt.Printf("Found user with ID: %d, Email: %s\n", user.ID, user.Email)
+		fmt.Printf("Found user with ID: %s, Email: %s\n", user.ID, user.Email)
 
 	// Compare passwords by converting both to a byte slice
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil {
@@ -213,4 +218,56 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"token": tokenString, 
 	})
+}
+
+// API endpoint for getting tags
+func (app *application) GetTags(w http.ResponseWriter, r *http.Request) {
+    fmt.Println("GetTags endpoint hit")
+    connStr := config.GetDBConfig()
+    db, err := sql.Open("postgres", connStr)
+    if err != nil {
+        fmt.Println("Database connection error:", err)
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+
+    // Query all tags
+    rows, err := db.Query(`
+        SELECT id, text, color, searches 
+        FROM tags`)  
+    if err != nil {
+        fmt.Println("Query error:", err)
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    defer rows.Close()
+
+    var tags []Tag
+    for rows.Next() {
+        var tag Tag
+        err := rows.Scan(
+            &tag.ID,
+            &tag.Text,
+            &tag.Color,
+            &tag.Searches,
+        )
+        if err != nil {
+            fmt.Println("Row scan error:", err)
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+
+        tags = append(tags, tag)
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+
+    if err := json.NewEncoder(w).Encode(tags); err != nil {
+        fmt.Println("JSON encoding error:", err)
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    fmt.Printf("Returning %d tags\n", len(tags))
 }

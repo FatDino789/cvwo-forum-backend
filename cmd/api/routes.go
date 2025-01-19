@@ -18,6 +18,7 @@ func (app *application) routes() http.Handler {
 	// routes for the API calls
     mux.Route("/api", func (r chi.Router)  {
         r.Get("/posts", app.GetPosts)
+		r.Get("/tags", app.GetTags)
 		r.Post("/login", app.Login) 
     })
 
