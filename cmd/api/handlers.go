@@ -219,14 +219,13 @@ func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
 
-    // Set creation time and updated time to current time
     currentTime := time.Now()
     post.CreatedAt = currentTime
     post.UpdatedAt = currentTime
     post.LikesCount = 0
     post.ViewsCount = 0
 
-    // Initialize empty arrays if they're nil
+
     if post.Comments == nil {
         post.Comments = []Comment{}
     }
@@ -234,7 +233,6 @@ func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
         post.Tags = []string{}
     }
 
-    // Convert comments to JSONB format
     commentsJSON, err := json.Marshal(post.Comments)
     if err != nil {
         fmt.Printf("Error marshaling comments: %v\n", err)
@@ -242,21 +240,20 @@ func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Debug print
     fmt.Printf("Inserting post with values: %+v\n", post)
 
     err = db.QueryRow(`
     INSERT INTO posts (
-        id,           -- 1
-        user_id,      -- 2
-        title,        -- 3
-        content,      -- 4
-        created_at,   -- 5
-        updated_at,   -- 6
-        likes_count,  -- 7
-        views_count,  -- 8
-        comments,     -- 9
-        tags          -- 10
+        id,           
+        user_id,      
+        title,        
+        content,      
+        created_at,   
+        updated_at,   
+        likes_count,  
+        views_count,  
+        comments,     
+        tags          
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING id`,
@@ -346,7 +343,7 @@ func (app *application) CreateTag(w http.ResponseWriter, r *http.Request) {
         RETURNING id`,
         tag.Text,
         tag.Color,
-        0, // Initial searches count
+        0, 
     ).Scan(&tag.ID)
 
     if err != nil {
@@ -364,7 +361,6 @@ func (app *application) CreateTag(w http.ResponseWriter, r *http.Request) {
 func (app *application) UpdateTagSearchCount(w http.ResponseWriter, r *http.Request) {
     fmt.Println("UpdateTagSearchCount endpoint hit")
     
-    // Get tag ID from URL using Chi instead of mux.Vars
     tagID := chi.URLParam(r, "id")
     if tagID == "" {
         http.Error(w, "Tag ID is required", http.StatusBadRequest)
