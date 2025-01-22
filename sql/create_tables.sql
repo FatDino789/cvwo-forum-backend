@@ -26,14 +26,12 @@ CREATE TABLE IF NOT EXISTS posts (
    user_id TEXT REFERENCES users(id),
    title VARCHAR(255) NOT NULL,
    content TEXT NOT NULL,
-   picture_url VARCHAR(255),
    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,  
    likes_count INTEGER DEFAULT 0,
    views_count INTEGER DEFAULT 0,
-   discussion_thread TEXT,
    comments JSONB DEFAULT '[]',
-   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-   tags TEXT[] DEFAULT '{}'  -- Array of tag UUIDs
+   tags TEXT[] DEFAULT '{}'  
 );
 
 -- Insert tags with mock UUIDs
@@ -47,15 +45,14 @@ INSERT INTO users (id, email, password_hash) VALUES
 ('123e4567-e89b-12d3-a456-426614174001', 'john@example.com', '$2a$10$mN6CaIxk7mU0QM3B2Q490euGHJS5Dx0AOTjG7v82f9dQL/Gm.gCEC'),
 ('123e4567-e89b-12d3-a456-426614174002', 'jane@example.com', '$2a$10$mN6CaIxk7mU0QM3B2Q490euGHJS5Dx0AOTjG7v82f9dQL/Gm.gCEC');
 
--- Insert posts with mock UUIDs and tags
-INSERT INTO posts (id, user_id, title, content, picture_url, created_at, likes_count, views_count, discussion_thread, comments, tags) VALUES 
+-- Insert posts with mock UUIDs, tags, and updated_at
+INSERT INTO posts (id, user_id, title, content, created_at, updated_at, likes_count, views_count, comments, tags) VALUES 
 ('123e4567-e89b-12d3-a456-426614174003', '123e4567-e89b-12d3-a456-426614174000', 'Exchange Experience in Tokyo', 
   'Sharing my amazing semester abroad experience at Waseda University!', 
-  'https://example.com/tokyo-campus.jpg', 
-  '2024-01-15T10:00:00Z', 
+  '2024-01-15T10:00:00Z',
+  '2024-01-15T10:00:00Z',  -- Added updated_at
   45, 
   230, 
-  'Looking for advice on accommodation and cultural adjustments',
   '[
     {
       "id": "123e4567-e89b-12d3-a456-426614174006",
@@ -74,11 +71,10 @@ INSERT INTO posts (id, user_id, title, content, picture_url, created_at, likes_c
 ),
 ('123e4567-e89b-12d3-a456-426614174004', '123e4567-e89b-12d3-a456-426614174001', 'NUS Exchange Application Guide', 
   'Step-by-step guide on applying for exchange at NUS', 
-  'https://example.com/nus-guide.jpg', 
-  '2024-01-16T14:30:00Z', 
+  '2024-01-16T14:30:00Z',
+  '2024-01-16T14:30:00Z',  -- Added updated_at
   78, 
   456, 
-  'Tips on module mapping and application timeline',
   '[
     {
       "id": "123e4567-e89b-12d3-a456-426614174008",
