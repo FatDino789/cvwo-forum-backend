@@ -338,12 +338,13 @@ func (app *application) CreateTag(w http.ResponseWriter, r *http.Request) {
     defer db.Close()
 
     err = db.QueryRow(`
-        INSERT INTO tags (text, color, searches)
-        VALUES ($1, $2, $3)
+        INSERT INTO tags (id, text, color, searches)
+        VALUES ($1, $2, $3, $4)
         RETURNING id`,
+        tag.ID,      
         tag.Text,
         tag.Color,
-        0, 
+        tag.Searches,
     ).Scan(&tag.ID)
 
     if err != nil {
