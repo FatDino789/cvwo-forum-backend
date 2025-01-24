@@ -23,10 +23,11 @@ func (app *application) routes() http.Handler {
         // Tag routes
         r.Get("/tags", app.GetTags)
         r.Post("/tags", app.CreateTag)
-        r.Patch("/tags/{id}/increment-search", app.UpdateTagSearchCount) // New endpoint for incrementing search count
+        r.Patch("/tags/{id}/increment-search", app.UpdateTagSearchCount) 
 
         // Authentication routes
         r.Post("/login", app.Login)
+		r.Post("/register", app.Register)
     })
 
     return mux

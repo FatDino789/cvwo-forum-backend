@@ -36,10 +36,12 @@ type Comment struct {
 }
 
 type User struct {
-    ID           string    `json:"id"`
-    Email        string    `json:"email"`
-    PasswordHash string    `json:"-"`
-    CreatedAt    time.Time `json:"created_at"`
+    ID            string    `json:"id"`
+    Username      string    `json:"username"` 
+    Email         string    `json:"email"`
+    PasswordHash  string    `json:"-"`
+    PlainPassword string    `json:"password"`
+    CreatedAt     time.Time `json:"created_at"`
 }
 
 type Tag struct {
@@ -138,6 +140,7 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    fmt.Printf("Login request received: %+v\n", creds)
     connStr := config.GetDBConfig()
     db, err := sql.Open("postgres", connStr)
     if err != nil {
@@ -148,7 +151,12 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     defer db.Close()
 
     var user User
-    err = db.QueryRow("SELECT id, email, password_hash FROM users WHERE email = $1", creds.Email).Scan(&user.ID, &user.Email, &user.PasswordHash)
+    err = db.QueryRow("SELECT id, username, email, password_hash FROM users WHERE email = $1", creds.Email).Scan(
+        &user.ID, 
+        &user.Username, 
+        &user.Email, 
+        &user.PasswordHash,
+    )
     if err != nil {
         fmt.Printf("User lookup error: %v\n", err)
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
@@ -180,17 +188,20 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     response := struct {
         Token string `json:"token"`
         User  struct {
-            ID    string `json:"id"`
-            Email string `json:"email"`
+            ID       string `json:"id"`
+            Username string `json:"username"`
+            Email    string `json:"email"`
         } `json:"user"`
     }{
         Token: tokenString,
         User: struct {
-            ID    string `json:"id"`
-            Email string `json:"email"`
+            ID       string `json:"id"`
+            Username string `json:"username"`
+            Email    string `json:"email"`
         }{
-            ID:    user.ID,
-            Email: user.Email,
+            ID:       user.ID,
+            Username: user.Username,
+            Email:    user.Email,
         },
     }
 
@@ -198,6 +209,93 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(response)
 }
+
+// Register handler
+func (app *application) Register(w http.ResponseWriter, r *http.Request) {
+    fmt.Println("Register endpoint hit")
+
+    var user User
+
+    if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+        fmt.Printf("Error decoding request body: %v\n", err)
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.PlainPassword), bcrypt.DefaultCost)
+    if err != nil {
+        fmt.Printf("Error hashing password: %v\n", err)
+        http.Error(w, "Error processing registration", http.StatusInternalServerError)
+        return
+    }
+    user.PasswordHash = string(hashedPassword)
+
+    connStr := config.GetDBConfig()
+    db, err := sql.Open("postgres", connStr)
+    if err != nil {
+        fmt.Printf("Database connection error: %v\n", err)
+        http.Error(w, "Database connection error", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+
+    err = db.QueryRow(`
+        INSERT INTO users (id, username, email, password_hash)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, username, email`,
+        user.ID,
+        user.Username,
+        user.Email,
+        user.PasswordHash,
+    ).Scan(&user.ID, &user.Username, &user.Email)
+
+    if err != nil {
+        fmt.Printf("Error inserting user: %v\n", err)
+        http.Error(w, "Error creating user", http.StatusInternalServerError)
+        return
+    }
+
+    expirationTime := time.Now().Add(24 * time.Hour)
+    claims := &Claims{
+        UserID: user.ID,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(expirationTime),
+        },
+    }
+
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    tokenString, err := token.SignedString([]byte(app.JwtSecret))
+    if err != nil {
+        fmt.Printf("Token generation error: %v\n", err)
+        http.Error(w, "Error generating token", http.StatusInternalServerError)
+        return
+    }
+
+    response := struct {
+        Token string `json:"token"`
+        User  struct {
+            ID       string `json:"id"`
+            Username string `json:"username"`
+            Email    string `json:"email"`
+        } `json:"user"`
+    }{
+        Token: tokenString,
+        User: struct {
+            ID       string `json:"id"`
+            Username string `json:"username"`
+            Email    string `json:"email"`
+        }{
+            ID:       user.ID,
+            Username: user.Username,
+            Email:    user.Email,
+        },
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+}
+
+
 
 // CreatePost handler
 func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
