@@ -123,14 +123,12 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
             return
         }
  
-        // Parse comments array
         if len(commentsStr) > 0 {
             if err := json.Unmarshal(commentsStr, &post.Comments); err != nil {
                 http.Error(w, err.Error(), http.StatusInternalServerError)
                 return
             }
-            
-            // For each comment, fetch the user details
+
             for i := range post.Comments {
                 var username string
                 var iconIndex, colorIndex int
@@ -139,7 +137,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
                     FROM users WHERE id = $1`, 
                     post.Comments[i].UserID).Scan(&username, &iconIndex, &colorIndex)
                 if err != nil {
-                    continue // Skip if user not found
+                    continue 
                 }
                 post.Comments[i].Username = username
                 post.Comments[i].IconIndex = iconIndex
@@ -155,6 +153,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(posts)
  }
 
+ // Event listener API Endpoint for posts
  func (app *application) StreamPosts(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/event-stream")
     w.Header().Set("Cache-Control", "no-cache")
@@ -166,8 +165,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "SSE not supported", http.StatusInternalServerError)
         return
     }
- 
-    // Initial posts
+
     posts, err := app.fetchPosts()
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -177,7 +175,6 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     fmt.Fprintf(w, "data: %s\n\n", data)
     flusher.Flush()
  
-    // Poll for updates
     ticker := time.NewTicker(2 * time.Second)
     defer ticker.Stop()
  
@@ -199,7 +196,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
 
  // UpdatePost handler
  func (app *application) UpdatePost(w http.ResponseWriter, r *http.Request) {
-    postID := chi.URLParam(r, "id") // Extract the post ID from the URL path
+    postID := chi.URLParam(r, "id") 
     if postID == "" {
         http.Error(w, "Post ID is required", http.StatusBadRequest)
         return
@@ -311,13 +308,11 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
             return nil, fmt.Errorf("row scan error: %v", err)
         }
 
-        // Parse comments array
         if len(commentsStr) > 0 {
             if err := json.Unmarshal(commentsStr, &post.Comments); err != nil {
                 return nil, fmt.Errorf("comments parsing error: %v", err)
             }
 
-            // Fetch user details for each comment
             for i := range post.Comments {
                 var username string
                 var iconIndex, colorIndex int
@@ -326,7 +321,7 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
                     FROM users WHERE id = $1`, 
                     post.Comments[i].UserID).Scan(&username, &iconIndex, &colorIndex)
                 if err != nil {
-                    continue // Skip if user details are not found
+                    continue 
                 }
                 post.Comments[i].Username = username
                 post.Comments[i].IconIndex = iconIndex
@@ -340,9 +335,9 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     return posts, nil
 }
 
+// Authentication handlers
 
-// Login handler
-// Login handler update
+// Login handler 
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     var creds Credentials
     if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
@@ -427,13 +422,16 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(response)
 }
 
-// Register handler update
+// Register handler
 func (app *application) Register(w http.ResponseWriter, r *http.Request) {
     var user User
     if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+        fmt.Printf("Decode error: %v\n", err)
+        fmt.Printf("Request body: %+v\n", r.Body)
         http.Error(w, "Invalid request body", http.StatusBadRequest)
         return
     }
+    fmt.Printf("Received user data: %+v\n", user)
 
     hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.PlainPassword), bcrypt.DefaultCost)
     if err != nil {
@@ -464,7 +462,8 @@ func (app *application) Register(w http.ResponseWriter, r *http.Request) {
     ).Scan(&user.ID, &user.Username, &user.Email, &user.IconIndex, &user.ColorIndex, pq.Array(&likes))
 
     if err != nil {
-        http.Error(w, "Error creating user", http.StatusInternalServerError)
+        fmt.Printf("Database error: %v\n", err)
+        http.Error(w, fmt.Sprintf("Error creating user: %v", err), http.StatusInternalServerError)
         return
     }
 
@@ -700,9 +699,9 @@ func (app *application) GetTags(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(tags)
 }
 
+// event listener for tags
 func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
     
-    // Set necessary headers for SSE
     w.Header().Set("Content-Type", "text/event-stream")
     w.Header().Set("Cache-Control", "no-cache")
     w.Header().Set("Connection", "keep-alive")
@@ -714,19 +713,16 @@ func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Fetch initial tags
     tags, err := app.fetchTags()
     if err != nil {
         http.Error(w, "Error fetching initial tags", http.StatusInternalServerError)
         return
     }
 
-    // Send initial tags to the client
     data, _ := json.Marshal(tags)
     fmt.Fprintf(w, "data: %s\n\n", data)
     flusher.Flush()
 
-    // Create a ticker to periodically fetch updates
     ticker := time.NewTicker(2 * time.Second)
     defer ticker.Stop()
 
@@ -735,7 +731,6 @@ func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
         case <-ticker.C:
             tags, err := app.fetchTags()
             if err != nil {
-                // Log and continue if there's an error fetching tags
                 fmt.Printf("Error fetching tags: %v\n", err)
                 continue
             }
@@ -745,12 +740,12 @@ func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
             flusher.Flush()
 
         case <-r.Context().Done():
-            // Stop streaming if the client disconnects
             return
         }
     }
 }
 
+// handler to fetch tags
 func (app *application) fetchTags() ([]Tag, error) {
     db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
@@ -777,12 +772,11 @@ func (app *application) fetchTags() ([]Tag, error) {
     return tags, nil
 }
 
-
+// handler to add comment
 func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
     postID := chi.URLParam(r, "id")
     fmt.Printf("AddComment endpoint hit for post ID: %s\n", postID)
  
-    // Parse request body
     var requestBody struct {
         Field string      `json:"field"`
         Value Comment     `json:"value"`
@@ -802,8 +796,7 @@ func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
         return
     }
     defer db.Close()
- 
-    // Get existing post and comments
+
     var post Post
     var commentsJSON []byte
 
@@ -823,8 +816,7 @@ func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
         http.Error(w, "Post not found", http.StatusNotFound)
         return
     }
- 
-    // Parse existing comments
+
     var comments []Comment
     if len(commentsJSON) > 0 {
         if err := json.Unmarshal(commentsJSON, &comments); err != nil {
@@ -834,7 +826,6 @@ func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
         }
     }
  
-    // Add new comment
     comments = append(comments, requestBody.Value)
     updatedCommentsJSON, err := json.Marshal(comments)
     if err != nil {
@@ -843,7 +834,6 @@ func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
         return
     }
  
-    // Update post
     _, err = db.Exec(`
         UPDATE posts 
         SET comments = $1, updated_at = CURRENT_TIMESTAMP
@@ -941,6 +931,7 @@ func (app *application) UpdateTagSearchCount(w http.ResponseWriter, r *http.Requ
     json.NewEncoder(w).Encode(tag)
 }
 
+// get user likes handler
 func (app *application) GetUserLikes(w http.ResponseWriter, r *http.Request) {
     userID := chi.URLParam(r, "id")
     fmt.Printf("GetUserLikes called for userID: %s\n", userID)
