@@ -32,6 +32,8 @@ func (app *application) routes() http.Handler {
         // Authentication routes
         r.Post("/login", app.Login)
 		r.Post("/register", app.Register)
+		r.Patch("/users/{id}/likes", app.UpdateUserLikes)
+		r.Get("/users/{id}/likes", app.GetUserLikes)
     })
 
     return mux

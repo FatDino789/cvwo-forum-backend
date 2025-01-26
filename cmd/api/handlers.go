@@ -50,6 +50,7 @@ type User struct {
     CreatedAt     time.Time `json:"created_at"`
     IconIndex     int       `json:"icon_index"`   
     ColorIndex    int       `json:"color_index"`   
+    Likes         []string  `json:"likes"`
  }
 
 type Tag struct {
@@ -341,39 +342,42 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
 
 
 // Login handler
+// Login handler update
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     var creds Credentials
     if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
         http.Error(w, "Invalid request Body", http.StatusBadRequest)
         return
     }
- 
+
     db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
         http.Error(w, "Database connection error", http.StatusInternalServerError)
         return
     }
     defer db.Close()
- 
+
     var user User
-    err = db.QueryRow("SELECT id, username, email, password_hash, icon_index, color_index FROM users WHERE email = $1", creds.Email).Scan(
+    var likes []string
+    err = db.QueryRow("SELECT id, username, email, password_hash, icon_index, color_index, likes FROM users WHERE email = $1", creds.Email).Scan(
         &user.ID,
         &user.Username,
         &user.Email,
         &user.PasswordHash,
         &user.IconIndex,
         &user.ColorIndex,
+        pq.Array(&likes),
     )
     if err != nil {
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
     }
- 
+
     if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil {
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
     }
- 
+
     expirationTime := time.Now().Add(24 * time.Hour)
     claims := &Claims{
         UserID: user.ID,
@@ -381,59 +385,149 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
             ExpiresAt: jwt.NewNumericDate(expirationTime),
         },
     }
- 
+
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
     tokenString, err := token.SignedString([]byte(app.JwtSecret))
     if err != nil {
         http.Error(w, "Error generating token", http.StatusInternalServerError)
         return
     }
- 
+
     response := struct {
         Token string `json:"token"`
         User  struct {
-            ID         string `json:"id"`
-            Username   string `json:"username"`
-            Email      string `json:"email"`
-            IconIndex  int    `json:"icon_index"`
-            ColorIndex int    `json:"color_index"`
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
         } `json:"user"`
     }{
         Token: tokenString,
         User: struct {
-            ID         string `json:"id"`
-            Username   string `json:"username"`
-            Email      string `json:"email"`
-            IconIndex  int    `json:"icon_index"`
-            ColorIndex int    `json:"color_index"`
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
         }{
             ID:         user.ID,
             Username:   user.Username,
             Email:      user.Email,
             IconIndex:  user.IconIndex,
             ColorIndex: user.ColorIndex,
+            Likes:      likes,
         },
     }
- 
+
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(response)
- }
- 
- // Register handler
- func (app *application) Register(w http.ResponseWriter, r *http.Request) {
+}
+
+// Register handler update
+func (app *application) Register(w http.ResponseWriter, r *http.Request) {
     var user User
     if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
         http.Error(w, "Invalid request body", http.StatusBadRequest)
         return
     }
- 
+
     hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.PlainPassword), bcrypt.DefaultCost)
     if err != nil {
         http.Error(w, "Error processing registration", http.StatusInternalServerError)
         return
     }
     user.PasswordHash = string(hashedPassword)
+
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        http.Error(w, "Database connection error", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+
+    likes := []string{}
+    err = db.QueryRow(`
+        INSERT INTO users (id, username, email, password_hash, icon_index, color_index, likes)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, username, email, icon_index, color_index, likes`,
+        user.ID,
+        user.Username,
+        user.Email,
+        user.PasswordHash,
+        user.IconIndex,
+        user.ColorIndex,
+        pq.Array(likes),
+    ).Scan(&user.ID, &user.Username, &user.Email, &user.IconIndex, &user.ColorIndex, pq.Array(&likes))
+
+    if err != nil {
+        http.Error(w, "Error creating user", http.StatusInternalServerError)
+        return
+    }
+
+    expirationTime := time.Now().Add(24 * time.Hour)
+    claims := &Claims{
+        UserID: user.ID,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(expirationTime),
+        },
+    }
+
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    tokenString, err := token.SignedString([]byte(app.JwtSecret))
+    if err != nil {
+        http.Error(w, "Error generating token", http.StatusInternalServerError)
+        return
+    }
+
+    response := struct {
+        Token string `json:"token"`
+        User  struct {
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
+        } `json:"user"`
+    }{
+        Token: tokenString,
+        User: struct {
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
+        }{
+            ID:         user.ID,
+            Username:   user.Username,
+            Email:      user.Email,
+            IconIndex:  user.IconIndex,
+            ColorIndex: user.ColorIndex,
+            Likes:      likes,
+        },
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+}
+
+func (app *application) UpdateUserLikes(w http.ResponseWriter, r *http.Request) {
+    userID := chi.URLParam(r, "id")
+    
+    var requestBody struct {
+        Field string `json:"field"`
+        Value string `json:"value"`
+    }
+ 
+    if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
  
     db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
@@ -442,69 +536,51 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     }
     defer db.Close()
  
+    var user User
+    var likes []string
     err = db.QueryRow(`
-        INSERT INTO users (id, username, email, password_hash, icon_index, color_index)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, username, email, icon_index, color_index`,
-        user.ID,
-        user.Username,
-        user.Email,
-        user.PasswordHash,
-        user.IconIndex,
-        user.ColorIndex,
-    ).Scan(&user.ID, &user.Username, &user.Email, &user.IconIndex, &user.ColorIndex)
+        UPDATE users 
+        SET likes = array_append(likes, $1)
+        WHERE id = $2
+        RETURNING id, username, email, icon_index, color_index, likes`,
+        requestBody.Value, userID,
+    ).Scan(&user.ID, &user.Username, &user.Email, &user.IconIndex, &user.ColorIndex, pq.Array(&likes))
  
     if err != nil {
-        http.Error(w, "Error creating user", http.StatusInternalServerError)
-        return
-    }
- 
-    expirationTime := time.Now().Add(24 * time.Hour)
-    claims := &Claims{
-        UserID: user.ID,
-        RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(expirationTime),
-        },
-    }
- 
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-    tokenString, err := token.SignedString([]byte(app.JwtSecret))
-    if err != nil {
-        http.Error(w, "Error generating token", http.StatusInternalServerError)
+        http.Error(w, "Error updating user", http.StatusInternalServerError)
         return
     }
  
     response := struct {
-        Token string `json:"token"`
-        User  struct {
-            ID         string `json:"id"`
-            Username   string `json:"username"`
-            Email      string `json:"email"`
-            IconIndex  int    `json:"icon_index"`
-            ColorIndex int    `json:"color_index"`
+        User struct {
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
         } `json:"user"`
     }{
-        Token: tokenString,
         User: struct {
-            ID         string `json:"id"`
-            Username   string `json:"username"`
-            Email      string `json:"email"`
-            IconIndex  int    `json:"icon_index"`
-            ColorIndex int    `json:"color_index"`
+            ID         string   `json:"id"`
+            Username   string   `json:"username"`
+            Email      string   `json:"email"`
+            IconIndex  int      `json:"icon_index"`
+            ColorIndex int      `json:"color_index"`
+            Likes      []string `json:"likes"`
         }{
             ID:         user.ID,
             Username:   user.Username,
             Email:      user.Email,
             IconIndex:  user.IconIndex,
             ColorIndex: user.ColorIndex,
+            Likes:      likes,
         },
     }
  
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(response)
  }
-
-
 
 // CreatePost handler
 func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
@@ -625,6 +701,8 @@ func (app *application) GetTags(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
+    
+    // Set necessary headers for SSE
     w.Header().Set("Content-Type", "text/event-stream")
     w.Header().Set("Cache-Control", "no-cache")
     w.Header().Set("Connection", "keep-alive")
@@ -636,6 +714,19 @@ func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Fetch initial tags
+    tags, err := app.fetchTags()
+    if err != nil {
+        http.Error(w, "Error fetching initial tags", http.StatusInternalServerError)
+        return
+    }
+
+    // Send initial tags to the client
+    data, _ := json.Marshal(tags)
+    fmt.Fprintf(w, "data: %s\n\n", data)
+    flusher.Flush()
+
+    // Create a ticker to periodically fetch updates
     ticker := time.NewTicker(2 * time.Second)
     defer ticker.Stop()
 
@@ -644,12 +735,17 @@ func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
         case <-ticker.C:
             tags, err := app.fetchTags()
             if err != nil {
+                // Log and continue if there's an error fetching tags
+                fmt.Printf("Error fetching tags: %v\n", err)
                 continue
             }
+
             data, _ := json.Marshal(tags)
             fmt.Fprintf(w, "data: %s\n\n", data)
             flusher.Flush()
+
         case <-r.Context().Done():
+            // Stop streaming if the client disconnects
             return
         }
     }
@@ -844,3 +940,32 @@ func (app *application) UpdateTagSearchCount(w http.ResponseWriter, r *http.Requ
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(tag)
 }
+
+func (app *application) GetUserLikes(w http.ResponseWriter, r *http.Request) {
+    userID := chi.URLParam(r, "id")
+    fmt.Printf("GetUserLikes called for userID: %s\n", userID)
+
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        http.Error(w, "Database connection error", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+ 
+    var likes []string
+    err = db.QueryRow("SELECT likes FROM users WHERE id = $1", userID).Scan(pq.Array(&likes))
+    if err != nil {
+        http.Error(w, "Error fetching likes", http.StatusInternalServerError)
+        return
+    }
+ 
+    response := struct {
+        Likes []string `json:"likes"`
+    }{
+        Likes: likes,
+    }
+ 
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+ }
+ 
