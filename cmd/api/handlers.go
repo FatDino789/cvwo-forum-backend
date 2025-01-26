@@ -624,6 +624,64 @@ func (app *application) GetTags(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(tags)
 }
 
+func (app *application) StreamTags(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "SSE not supported", http.StatusInternalServerError)
+        return
+    }
+
+    ticker := time.NewTicker(2 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ticker.C:
+            tags, err := app.fetchTags()
+            if err != nil {
+                continue
+            }
+            data, _ := json.Marshal(tags)
+            fmt.Fprintf(w, "data: %s\n\n", data)
+            flusher.Flush()
+        case <-r.Context().Done():
+            return
+        }
+    }
+}
+
+func (app *application) fetchTags() ([]Tag, error) {
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        return nil, fmt.Errorf("database connection error: %v", err)
+    }
+    defer db.Close()
+
+    rows, err := db.Query(`SELECT id, text, color, searches FROM tags`)
+    if err != nil {
+        return nil, fmt.Errorf("query error: %v", err)
+    }
+    defer rows.Close()
+
+    var tags []Tag
+    for rows.Next() {
+        var tag Tag
+        err := rows.Scan(&tag.ID, &tag.Text, &tag.Color, &tag.Searches)
+        if err != nil {
+            return nil, fmt.Errorf("row scan error: %v", err)
+        }
+        tags = append(tags, tag)
+    }
+
+    return tags, nil
+}
+
+
 func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
     postID := chi.URLParam(r, "id")
     fmt.Printf("AddComment endpoint hit for post ID: %s\n", postID)

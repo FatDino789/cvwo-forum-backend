@@ -27,6 +27,7 @@ func (app *application) routes() http.Handler {
         r.Get("/tags", app.GetTags)
         r.Post("/tags", app.CreateTag)
         r.Patch("/tags/{id}/increment-search", app.UpdateTagSearchCount) 
+		r.Get("/events/tags", app.StreamTags)
 
         // Authentication routes
         r.Post("/login", app.Login)
