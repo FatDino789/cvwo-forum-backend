@@ -154,6 +154,192 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(posts)
  }
 
+ func (app *application) StreamPosts(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+ 
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "SSE not supported", http.StatusInternalServerError)
+        return
+    }
+ 
+    // Initial posts
+    posts, err := app.fetchPosts()
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    data, _ := json.Marshal(posts)
+    fmt.Fprintf(w, "data: %s\n\n", data)
+    flusher.Flush()
+ 
+    // Poll for updates
+    ticker := time.NewTicker(2 * time.Second)
+    defer ticker.Stop()
+ 
+    for {
+        select {
+        case <-ticker.C:
+            posts, err := app.fetchPosts()
+            if err != nil {
+                continue
+            }
+            data, _ := json.Marshal(posts)
+            fmt.Fprintf(w, "data: %s\n\n", data)
+            flusher.Flush()
+        case <-r.Context().Done():
+            return
+        }
+    }
+ }
+
+ // UpdatePost handler
+ func (app *application) UpdatePost(w http.ResponseWriter, r *http.Request) {
+    postID := chi.URLParam(r, "id") // Extract the post ID from the URL path
+    if postID == "" {
+        http.Error(w, "Post ID is required", http.StatusBadRequest)
+        return
+    }
+
+    var requestBody struct {
+        Field string      `json:"field"`
+        Value interface{} `json:"value"`
+    }
+
+    if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+        fmt.Printf("Error decoding request body: %v\n", err)
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    allowedFields := map[string]bool{
+        "likes_count": true,
+        "views_count": true,
+        "title":       true,
+        "content":     true,
+        "tags":        true,
+    }
+
+    if !allowedFields[requestBody.Field] {
+        http.Error(w, "Invalid field for update", http.StatusBadRequest)
+        return
+    }
+
+    updatedAt := time.Now().UTC()
+
+    query := fmt.Sprintf("UPDATE posts SET %s = $1, updated_at = $2 WHERE id = $3 RETURNING id, %s, updated_at", requestBody.Field, requestBody.Field)
+    var updatedValue interface{}
+
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        fmt.Printf("Database connection error: %v\n", err)
+        http.Error(w, "Database connection error", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+
+    err = db.QueryRow(query, requestBody.Value, updatedAt, postID).Scan(&postID, &updatedValue, &updatedAt)
+    if err != nil {
+        fmt.Printf("Error updating post: %v\n", err)
+        http.Error(w, "Error updating post", http.StatusInternalServerError)
+        return
+    }
+
+    response := struct {
+        PostID      string      `json:"post_id"`
+        UpdatedField string      `json:"field"`
+        UpdatedValue interface{} `json:"value"`
+        UpdatedAt   time.Time   `json:"updated_at"`
+    }{
+        PostID:      postID,
+        UpdatedField: requestBody.Field,
+        UpdatedValue: updatedValue,
+        UpdatedAt:   updatedAt,
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
+}
+
+
+ 
+ func (app *application) fetchPosts() ([]Post, error) {
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        return nil, fmt.Errorf("database connection error: %v", err)
+    }
+    defer db.Close()
+
+    rows, err := db.Query(`
+        SELECT p.id, p.user_id, p.title, p.content,
+               p.created_at, p.likes_count, p.views_count, 
+               p.comments, p.updated_at, p.tags,
+               u.username, u.icon_index, u.color_index
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        ORDER BY p.created_at DESC`)
+    if err != nil {
+        return nil, fmt.Errorf("query error: %v", err)
+    }
+    defer rows.Close()
+
+    var posts []Post
+    for rows.Next() {
+        var post Post
+        var commentsStr []byte
+
+        err := rows.Scan(
+            &post.ID,
+            &post.UserID,
+            &post.Title,
+            &post.Content,
+            &post.CreatedAt,
+            &post.LikesCount,
+            &post.ViewsCount,
+            &commentsStr,
+            &post.UpdatedAt,
+            pq.Array(&post.Tags),
+            &post.Username,
+            &post.IconIndex,
+            &post.ColorIndex,
+        )
+        if err != nil {
+            return nil, fmt.Errorf("row scan error: %v", err)
+        }
+
+        // Parse comments array
+        if len(commentsStr) > 0 {
+            if err := json.Unmarshal(commentsStr, &post.Comments); err != nil {
+                return nil, fmt.Errorf("comments parsing error: %v", err)
+            }
+
+            // Fetch user details for each comment
+            for i := range post.Comments {
+                var username string
+                var iconIndex, colorIndex int
+                err := db.QueryRow(`
+                    SELECT username, icon_index, color_index 
+                    FROM users WHERE id = $1`, 
+                    post.Comments[i].UserID).Scan(&username, &iconIndex, &colorIndex)
+                if err != nil {
+                    continue // Skip if user details are not found
+                }
+                post.Comments[i].Username = username
+                post.Comments[i].IconIndex = iconIndex
+                post.Comments[i].ColorIndex = colorIndex
+            }
+        }
+
+        posts = append(posts, post)
+    }
+
+    return posts, nil
+}
+
+
 // Login handler
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     var creds Credentials

@@ -19,7 +19,9 @@ func (app *application) routes() http.Handler {
         // Post routes
         r.Get("/posts", app.GetPosts)
         r.Post("/posts", app.CreatePost)
+		r.Patch("/posts/{id}", app.UpdatePost)
 		r.Patch("/posts/{id}/comments", app.AddComment)
+		r.Get("/events/posts", app.StreamPosts)
 
         // Tag routes
         r.Get("/tags", app.GetTags)
