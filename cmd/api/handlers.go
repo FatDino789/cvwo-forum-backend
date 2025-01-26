@@ -26,14 +26,20 @@ type Post struct {
     Comments    []Comment `json:"comments"`
     UpdatedAt   time.Time `json:"updated_at"`
     Tags        []string  `json:"tags"`
+    Username    string `json:"username"`
+    IconIndex   int    `json:"icon_index"`
+    ColorIndex  int    `json:"color_index"`
 }
 
 type Comment struct {
-    ID        string    `json:"id"`
-    UserID    string    `json:"user_id"`
-    Content   string    `json:"content"`
-    CreatedAt time.Time `json:"created_at"`
-}
+    ID          string    `json:"id"`
+    UserID      string    `json:"user_id"`
+    Content     string    `json:"content"`
+    CreatedAt   time.Time `json:"created_at"`
+    Username    string    `json:"username"`
+    IconIndex   int       `json:"icon_index"`
+    ColorIndex  int       `json:"color_index"`
+ }
 
 type User struct {
     ID            string    `json:"id"`
@@ -42,7 +48,9 @@ type User struct {
     PasswordHash  string    `json:"-"`
     PlainPassword string    `json:"password"`
     CreatedAt     time.Time `json:"created_at"`
-}
+    IconIndex     int       `json:"icon_index"`   
+    ColorIndex    int       `json:"color_index"`   
+ }
 
 type Tag struct {
     ID       string `json:"id"`
@@ -68,34 +76,32 @@ func (app *application) Home(w http.ResponseWriter, r *http.Request) {
 
 // GetPosts handler
 func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("GetPosts endpoint hit")
-    connStr := config.GetDBConfig()
-    db, err := sql.Open("postgres", connStr)
+    db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
-        fmt.Println("Database connection error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
     defer db.Close()
-
+ 
     rows, err := db.Query(`
-        SELECT id, user_id, title, content,
-               created_at, likes_count, views_count, 
-               comments, updated_at, tags 
-        FROM posts
-        ORDER BY created_at DESC`)
+        SELECT p.id, p.user_id, p.title, p.content,
+               p.created_at, p.likes_count, p.views_count, 
+               p.comments, p.updated_at, p.tags,
+               u.username, u.icon_index, u.color_index
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        ORDER BY p.created_at DESC`)
     if err != nil {
-        fmt.Println("Query error:", err)
         http.Error(w, err.Error(), http.StatusInternalServerError)
         return
     }
     defer rows.Close()
-
+ 
     var posts []Post
     for rows.Next() {
         var post Post
-        var comments []byte
-
+        var commentsStr []byte
+ 
         err := rows.Scan(
             &post.ID,
             &post.UserID,
@@ -104,71 +110,84 @@ func (app *application) GetPosts(w http.ResponseWriter, r *http.Request) {
             &post.CreatedAt,
             &post.LikesCount,
             &post.ViewsCount,
-            &comments,
+            &commentsStr,
             &post.UpdatedAt,
             pq.Array(&post.Tags),
+            &post.Username,
+            &post.IconIndex,
+            &post.ColorIndex,
         )
         if err != nil {
-            fmt.Println("Row scan error:", err)
             http.Error(w, err.Error(), http.StatusInternalServerError)
             return
         }
-
-        if len(comments) > 0 {
-            err = json.Unmarshal(comments, &post.Comments)
-            if err != nil {
-                fmt.Println("Comments parsing error:", err)
+ 
+        // Parse comments array
+        if len(commentsStr) > 0 {
+            if err := json.Unmarshal(commentsStr, &post.Comments); err != nil {
                 http.Error(w, err.Error(), http.StatusInternalServerError)
                 return
             }
+            
+            // For each comment, fetch the user details
+            for i := range post.Comments {
+                var username string
+                var iconIndex, colorIndex int
+                err := db.QueryRow(`
+                    SELECT username, icon_index, color_index 
+                    FROM users WHERE id = $1`, 
+                    post.Comments[i].UserID).Scan(&username, &iconIndex, &colorIndex)
+                if err != nil {
+                    continue // Skip if user not found
+                }
+                post.Comments[i].Username = username
+                post.Comments[i].IconIndex = iconIndex
+                post.Comments[i].ColorIndex = colorIndex
+            }
         }
-
+ 
         posts = append(posts, post)
     }
-
+ 
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(posts)
-}
+ }
 
 // Login handler
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
     var creds Credentials
     if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-        fmt.Printf("Error decoding request body: %v\n", err)
         http.Error(w, "Invalid request Body", http.StatusBadRequest)
         return
     }
-
-    fmt.Printf("Login request received: %+v\n", creds)
-    connStr := config.GetDBConfig()
-    db, err := sql.Open("postgres", connStr)
+ 
+    db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
-        fmt.Printf("Database connection error: %v\n", err)
         http.Error(w, "Database connection error", http.StatusInternalServerError)
         return
     }
     defer db.Close()
-
+ 
     var user User
-    err = db.QueryRow("SELECT id, username, email, password_hash FROM users WHERE email = $1", creds.Email).Scan(
-        &user.ID, 
-        &user.Username, 
-        &user.Email, 
+    err = db.QueryRow("SELECT id, username, email, password_hash, icon_index, color_index FROM users WHERE email = $1", creds.Email).Scan(
+        &user.ID,
+        &user.Username,
+        &user.Email,
         &user.PasswordHash,
+        &user.IconIndex,
+        &user.ColorIndex,
     )
     if err != nil {
-        fmt.Printf("User lookup error: %v\n", err)
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
     }
-
+ 
     if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(creds.Password)); err != nil {
-        fmt.Printf("Password comparison failed: %v\n", err)
         http.Error(w, "Invalid credentials", http.StatusUnauthorized)
         return
     }
-
+ 
     expirationTime := time.Now().Add(24 * time.Hour)
     claims := &Claims{
         UserID: user.ID,
@@ -176,85 +195,84 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
             ExpiresAt: jwt.NewNumericDate(expirationTime),
         },
     }
-
+ 
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
     tokenString, err := token.SignedString([]byte(app.JwtSecret))
     if err != nil {
-        fmt.Printf("Token generation error: %v\n", err)
         http.Error(w, "Error generating token", http.StatusInternalServerError)
         return
     }
-
+ 
     response := struct {
         Token string `json:"token"`
         User  struct {
-            ID       string `json:"id"`
-            Username string `json:"username"`
-            Email    string `json:"email"`
+            ID         string `json:"id"`
+            Username   string `json:"username"`
+            Email      string `json:"email"`
+            IconIndex  int    `json:"icon_index"`
+            ColorIndex int    `json:"color_index"`
         } `json:"user"`
     }{
         Token: tokenString,
         User: struct {
-            ID       string `json:"id"`
-            Username string `json:"username"`
-            Email    string `json:"email"`
+            ID         string `json:"id"`
+            Username   string `json:"username"`
+            Email      string `json:"email"`
+            IconIndex  int    `json:"icon_index"`
+            ColorIndex int    `json:"color_index"`
         }{
-            ID:       user.ID,
-            Username: user.Username,
-            Email:    user.Email,
+            ID:         user.ID,
+            Username:   user.Username,
+            Email:      user.Email,
+            IconIndex:  user.IconIndex,
+            ColorIndex: user.ColorIndex,
         },
     }
-
+ 
     w.Header().Set("Content-Type", "application/json")
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(response)
-}
-
-// Register handler
-func (app *application) Register(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("Register endpoint hit")
-
+ }
+ 
+ // Register handler
+ func (app *application) Register(w http.ResponseWriter, r *http.Request) {
     var user User
-
     if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-        fmt.Printf("Error decoding request body: %v\n", err)
         http.Error(w, "Invalid request body", http.StatusBadRequest)
         return
     }
-
+ 
     hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.PlainPassword), bcrypt.DefaultCost)
     if err != nil {
-        fmt.Printf("Error hashing password: %v\n", err)
         http.Error(w, "Error processing registration", http.StatusInternalServerError)
         return
     }
     user.PasswordHash = string(hashedPassword)
-
-    connStr := config.GetDBConfig()
-    db, err := sql.Open("postgres", connStr)
+ 
+    db, err := sql.Open("postgres", config.GetDBConfig())
     if err != nil {
-        fmt.Printf("Database connection error: %v\n", err)
         http.Error(w, "Database connection error", http.StatusInternalServerError)
         return
     }
     defer db.Close()
-
+ 
     err = db.QueryRow(`
-        INSERT INTO users (id, username, email, password_hash)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, username, email`,
+        INSERT INTO users (id, username, email, password_hash, icon_index, color_index)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, username, email, icon_index, color_index`,
         user.ID,
         user.Username,
         user.Email,
         user.PasswordHash,
-    ).Scan(&user.ID, &user.Username, &user.Email)
-
+        user.IconIndex,
+        user.ColorIndex,
+    ).Scan(&user.ID, &user.Username, &user.Email, &user.IconIndex, &user.ColorIndex)
+ 
     if err != nil {
-        fmt.Printf("Error inserting user: %v\n", err)
         http.Error(w, "Error creating user", http.StatusInternalServerError)
         return
     }
-
+ 
     expirationTime := time.Now().Add(24 * time.Hour)
     claims := &Claims{
         UserID: user.ID,
@@ -262,38 +280,43 @@ func (app *application) Register(w http.ResponseWriter, r *http.Request) {
             ExpiresAt: jwt.NewNumericDate(expirationTime),
         },
     }
-
+ 
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
     tokenString, err := token.SignedString([]byte(app.JwtSecret))
     if err != nil {
-        fmt.Printf("Token generation error: %v\n", err)
         http.Error(w, "Error generating token", http.StatusInternalServerError)
         return
     }
-
+ 
     response := struct {
         Token string `json:"token"`
         User  struct {
-            ID       string `json:"id"`
-            Username string `json:"username"`
-            Email    string `json:"email"`
+            ID         string `json:"id"`
+            Username   string `json:"username"`
+            Email      string `json:"email"`
+            IconIndex  int    `json:"icon_index"`
+            ColorIndex int    `json:"color_index"`
         } `json:"user"`
     }{
         Token: tokenString,
         User: struct {
-            ID       string `json:"id"`
-            Username string `json:"username"`
-            Email    string `json:"email"`
+            ID         string `json:"id"`
+            Username   string `json:"username"`
+            Email      string `json:"email"`
+            IconIndex  int    `json:"icon_index"`
+            ColorIndex int    `json:"color_index"`
         }{
-            ID:       user.ID,
-            Username: user.Username,
-            Email:    user.Email,
+            ID:         user.ID,
+            Username:   user.Username,
+            Email:      user.Email,
+            IconIndex:  user.IconIndex,
+            ColorIndex: user.ColorIndex,
         },
     }
-
+ 
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(response)
-}
+ }
 
 
 
@@ -341,31 +364,31 @@ func (app *application) CreatePost(w http.ResponseWriter, r *http.Request) {
     fmt.Printf("Inserting post with values: %+v\n", post)
 
     err = db.QueryRow(`
-    INSERT INTO posts (
-        id,           
-        user_id,      
-        title,        
-        content,      
-        created_at,   
-        updated_at,   
-        likes_count,  
-        views_count,  
-        comments,     
-        tags          
-    )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    RETURNING id`,
-    post.ID,
-    post.UserID,
-    post.Title,
-    post.Content,
-    post.CreatedAt,
-    post.UpdatedAt, 
-    post.LikesCount,
-    post.ViewsCount,
-    commentsJSON,
-    pq.Array(post.Tags),
-).Scan(&post.ID)
+        INSERT INTO posts (
+            id,           
+            user_id,      
+            title,        
+            content,      
+            created_at,   
+            updated_at,   
+            likes_count,  
+            views_count,  
+            comments,     
+            tags          
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id`,
+        post.ID,
+        post.UserID,
+        post.Title,
+        post.Content,
+        post.CreatedAt,
+        post.UpdatedAt, 
+        post.LikesCount,
+        post.ViewsCount,
+        commentsJSON,
+        pq.Array(post.Tags),
+    ).Scan(&post.ID)
 
     if err != nil {
         fmt.Printf("Error inserting post: %v\n", err)
@@ -414,6 +437,89 @@ func (app *application) GetTags(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Access-Control-Allow-Origin", "*")
     json.NewEncoder(w).Encode(tags)
 }
+
+func (app *application) AddComment(w http.ResponseWriter, r *http.Request) {
+    postID := chi.URLParam(r, "id")
+    fmt.Printf("AddComment endpoint hit for post ID: %s\n", postID)
+ 
+    // Parse request body
+    var requestBody struct {
+        Field string      `json:"field"`
+        Value Comment     `json:"value"`
+        PostID string    `json:"postId"`
+    }
+    
+    if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+        fmt.Printf("Error decoding request: %v\n", err)
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+ 
+    db, err := sql.Open("postgres", config.GetDBConfig())
+    if err != nil {
+        fmt.Printf("Database error: %v\n", err)
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
+ 
+    // Get existing post and comments
+    var post Post
+    var commentsJSON []byte
+
+    err = db.QueryRow(`
+        SELECT p.id, p.user_id, p.title, p.content, p.created_at, 
+            p.likes_count, p.views_count, p.comments, p.updated_at, 
+            p.tags, u.username, u.icon_index, u.color_index
+        FROM posts p
+        JOIN users u ON p.user_id = u.id  
+        WHERE p.id = $1`, postID).Scan(
+            &post.ID, &post.UserID, &post.Title, &post.Content, &post.CreatedAt,
+            &post.LikesCount, &post.ViewsCount, &commentsJSON, &post.UpdatedAt,
+            pq.Array(&post.Tags), &post.Username, &post.IconIndex, &post.ColorIndex)
+ 
+    if err != nil {
+        fmt.Printf("Error fetching post: %v\n", err)
+        http.Error(w, "Post not found", http.StatusNotFound)
+        return
+    }
+ 
+    // Parse existing comments
+    var comments []Comment
+    if len(commentsJSON) > 0 {
+        if err := json.Unmarshal(commentsJSON, &comments); err != nil {
+            fmt.Printf("Error parsing comments: %v\n", err)
+            http.Error(w, "Error parsing comments", http.StatusInternalServerError)
+            return
+        }
+    }
+ 
+    // Add new comment
+    comments = append(comments, requestBody.Value)
+    updatedCommentsJSON, err := json.Marshal(comments)
+    if err != nil {
+        fmt.Printf("Error marshaling comments: %v\n", err)
+        http.Error(w, "Error processing comments", http.StatusInternalServerError)
+        return
+    }
+ 
+    // Update post
+    _, err = db.Exec(`
+        UPDATE posts 
+        SET comments = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2`,
+        updatedCommentsJSON, postID)
+ 
+    if err != nil {
+        fmt.Printf("Error updating post: %v\n", err)
+        http.Error(w, "Error updating post", http.StatusInternalServerError)
+        return
+    }
+ 
+    post.Comments = comments
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(post)
+ }
 
 // CreateTag handler
 func (app *application) CreateTag(w http.ResponseWriter, r *http.Request) {
